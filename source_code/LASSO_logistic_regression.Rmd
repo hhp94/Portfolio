@@ -1,20 +1,16 @@
 ---
 title: "Implementation of LASSO-Logistic regression."
-date: "4/1/2020"
+author: "Hung Pham"
+date: "4/21/2020"
 output:
-  html_document:
-    css: style.css
-    toc: true
-    number_sections: FALSE
-    toc_float:
-        collapsed: false
-        smooth_scroll: false
-    theme: cerulean
+  pdf_document:
+    number_sections: TRUE
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
+library(kableExtra)
 library(tidymodels)
 library(tidyverse)
 require(glmnet)
@@ -23,7 +19,7 @@ library(corrplot)
 set.seed(123456)
 ```
 
-## Synopsis
+# Synopsis
 This project showcases the manual implementation of the LASSO algorithm with 
 logistic regression in R. We compare our implementation to the gold-standard 
 implementation in the R package `{glmnet}` by Jerome Friedman et. al. in classifying
@@ -39,7 +35,7 @@ optimizer
 Our implementation are shown to be comparable to gold-standard implementations 
 in R. The source code can be found in the source_code folder.
 
-## Data description
+# Data description
 The data `breast-cancer.csv` have 569 row and 33 columns. From the UCI repository:  
 
 > Features are computed from a digitized image of a fine needle aspirate (FNA) of a breast 
@@ -61,8 +57,9 @@ There are 357 benign and 212 malignant cases in the `diagnosis` column which wil
 <b> Our goal is to use LASSO-logistic regression to build a predictive model using 
 the 30 feature columns to predict if a case is either malignant or benign. </b>
 
-### Data import and clean-up
-We import the data and study the correlation structure.\
+## Data import and clean-up
+We import the data and study the correlation structure.
+
 ```{r, fig.width=6,fig.height=6, fig.align='center'}
 breast_raw<- read.csv(paste0(
         here::here(),"/data/breast-cancer.csv"),
@@ -74,8 +71,9 @@ corrplot(corr_matrix)
 ```
 
 We scale and center our data. Also, we remove the variables that have correlation > 
-0.9. In the end, we have 20 variables.\
-```{r, cache= TRUE, fig.width=6,fig.height=6, fig.align='center'}
+0.9. In the end, we have 20 variables.
+
+```{r, cache= TRUE, fig.width=4,fig.height=4, fig.align='center'}
 breast<-breast_raw %>% select(-perimeter_mean,-area_mean,-radius_worst,
                               -radius_se,-perimeter_worst,-area_worst,
                               -texture_worst,-concave_points_worst,
@@ -95,8 +93,8 @@ corrplot(corr_matrix_1)
 This correlogram correspond to the cleaned version of the data we are using to
 fit our results.  
 
-## Implementations
-### Logistic regression
+# Implementations
+## Logistic regression
 A logistic regression algorithm is used to regress a linear combination of 
 features to a continuous outcome (probability from 0 to 1) using the logit link
 function. To accomplish this, we need two parts: 1) a function that calculate
@@ -105,6 +103,7 @@ finds the maximum likelihood using the gradient and hessian as the input. The
 following is the former part. The likelihood is calculated as: $$\sum \textbf{Y} \cdot (\textbf{X}\beta-log(1+exp(\textbf{X}\beta))+(1-\textbf{Y}) \cdot (-log(1+ exp(\textbf{X}\beta)))$$\
 The gradient is calculated as: $$\textbf{X}(\textbf{Y}-\frac{exp(\textbf{X}\beta)}{1+exp(\textbf{X}\beta)})$$\
 The Hessian is calculated as: $$\textbf{-X}^Tdiag(\frac{exp(\textbf{X}\beta)}{1+exp(\textbf{X}\beta)})\textbf{X}$$\
+
 ```{r}
 logistic_mle <- function(dat, beta_vec, response = "diagnosis", refit = T) {
         # y_mat is the outcome column
@@ -127,7 +126,7 @@ logistic_mle <- function(dat, beta_vec, response = "diagnosis", refit = T) {
 }
 ```
 
-### Newton-Raphson optimizer
+## Newton-Raphson optimizer
 The Newton-Raphson optimizer, with step-halving and re-direction steps, is used
 to find the direction of the steepest descent to a local minima (or equivalently 
 ascent to a local maxima with the opposite sign) by solving for the system of 
@@ -183,7 +182,7 @@ newton_raphson <- function(dat, fun, start, tol=1e-10,
 }
 ```
 
-### LASSO-Logistic Regression
+## LASSO-Logistic Regression
 The lasso logistic regression algorithm can use soft-thresholding and coordinate 
 descent to find the solutions of the $\beta$ estimates. With the implemented 
 "warm start", our algorithm have a comparable rate of convergence to the 
@@ -243,11 +242,12 @@ logistic_lasso <- function(data, y, lambda, beta_vec, tol = 1e-10,
 }
 ```
 
-## Results
-### Logistic Regression
+# Results
+## Classical Logistic Regression with Newton-Raphson optimizer
 We fit our logistic implementation to classify image "M" as 1 and "B" as 0. We 
 use our Newton-Raphson function for optimization. We also compare our function 
-estimate to `{glmnet}` estimates.\
+estimate to `{glmnet}` estimates.
+
 ```{r, cache = T}
 ans <- newton_raphson(breast_no_int,
                      logistic_mle,
@@ -286,14 +286,15 @@ logistic<-tibble(ans$estimates,
 The following table shows the beta estimates of our logistic implementation and 
 `{glmnet}`. Our function performs comparably to `{glmnet}`.
 ```{r}
-logistic %>% knitr::kable()
+logistic %>% knitr::kable() %>%         
+        kable_classic_2(latex_options = "HOLD_position", position = "center")
 ```
 
-### LASSO-logistic regression
-#### Lambda = 0
+## LASSO-logistic regression
+### Lambda = 0
 We compare the results of our `logistic_lasso` function at $\lambda = 0$ to our 
-Newton-Raphson logistic function and `{glmnet}` to make sure that soft-thresholding
-with $\lambda = 0$ yields the same results.
+Newton-Raphson logistic function and `{glmnet}` to make sure that 
+soft-thresholding with $\lambda = 0$ yields the same results.
 
 ```{r, cache= F}
 # separate x and y to calculate lambda max
@@ -310,19 +311,20 @@ log_lasso<-logistic_lasso(data=breast_int_x,
 log_lasso_res<-tibble(logistic,
                 our_logistic_lasso = log_lasso$estimates$coefficient) %>% 
         mutate(across(.cols = where(is.numeric),.fns = function(x)round(x,4)))
-log_lasso_res %>% knitr::kable()
+log_lasso_res %>% knitr::kable() %>%         
+        kable_classic_2(latex_options = "HOLD_position", position = "center")
 ```
-Our estimates are very similar, indicating that our implementations works well.\
+Our estimates are very similar, indicating that our implementations works well.
 
-#### Lambda > 0
-We find the maximum $\lambda$ that will shrink all our beta estimates to 0.\
+### Lambda > 0
+We find the maximum $\lambda$ that will shrink all our beta estimates to 0.
 ```{r}
 lambda_max<-max((t(as.matrix(breast_int_x)) %*% breast_int_y)/nrow(breast_int_x))
 lambda_max
 ```
 
 With $\lambda_{max} = max_l\frac{<X_lY>}{N}=0.3725835$, we make a 
-sequence from 0 to 0.4, by 0.02 per step and make path plots.\
+sequence from 0 to 0.4, by 0.02 per step and make path plots.
 
 ```{r, cache=F}
 lambda_seq<-seq(from = 0, to = 0.4, by = 0.02)
@@ -350,7 +352,6 @@ path_lasso_glmnet<-function(my_seq){
                 my_rec <- recipe(diagnosis  ~ ., data = test_dat)
                 
         for_map<-function(x){
-                
                 my_model <- logistic_reg(penalty = x, mixture = 1) %>%
                         set_engine("glmnet") %>%
                         set_mode("classification")
@@ -365,7 +366,8 @@ path_lasso_glmnet<-function(my_seq){
                         pull_workflow_fit() %>% tidy()
                 fit_data
         }
-        res<-map(my_seq,for_map) %>% reduce(rbind) %>% rename(coefficient = estimate)
+        res<-map(my_seq,for_map) %>% reduce(rbind) %>% 
+                rename(coefficient = estimate)
         res$func = "glmnet"
         res 
 }
@@ -374,7 +376,8 @@ path_my_function<-path_lasso_custom(lambda_seq)
 path_glm_net<-path_lasso_glmnet(lambda_seq)
 
 for_viz<- rbind(path_my_function, path_glm_net) %>% 
-        mutate(func = if_else(func == "logistic_lasso", "Our Implementation of logistic LASSO", func))
+        mutate(func = if_else(func == "logistic_lasso", 
+                              "Our Implementation of logistic LASSO", func))
 ```
 
 ```{r, cache=F, fig.align='center',fig.width=10,fig.height=6}
@@ -385,12 +388,12 @@ for_viz %>% ggplot(aes(x = penalty, y = coefficient,color = term))+
 ```
 This figure shows us the path of coefficients of increasing $\lambda$ between
 `{glmnet}` and our implementation. Our function regularizes the coefficient term, 
-while `{glmnet}` does not.\
+while `{glmnet}` does not.
 
 ### Cross-Validation to find optimal penalty
 We perform a 10 fold CV with 5 repeats each to tune our $\lambda$. We select the 
 best $\lambda$ based on best ROC AUC. Our best $\lambda$ is $0.00475$. We compare
-our function to `{glmnet}` at $\lambda = 0.00475$.\
+our function to `{glmnet}` at $\lambda = 0.00475$.
 
 #### Using grid search to tune lasso
 ```{r, cache = T}
@@ -437,7 +440,7 @@ tune_lasso_grid %>%
         ylim(0.98,1)
 ```
 
-```{r, cache = T}
+```{r, cache = T, fig.width=5, fig.height=4}
 min_auc <- tune_lasso_grid %>%
         select_best("roc_auc")
 final_wf <- finalize_workflow(
@@ -453,16 +456,18 @@ our_function<-path_lasso_custom(0.00475) %>% select(-func,-penalty) %>%
         rename("our_function" = coefficient) %>% 
         left_join(fit_data, by = "term") %>% 
         rename("glmnet" = estimate)
-our_function %>% knitr::kable()
+
+our_function %>% knitr::kable() %>%         
+        kable_classic_2(latex_options = "HOLD_position", position = "center")
 ```
 
-## Summary
+# Summary
 - Our function regularizes the intercept, whereas `{glmnet}` doesn't.\
 - The estimates are very similar, indicating that our code is correct.\
 - `radius_mean` seems to have the highest beta. This means that at each point
 increase of standard deviation in `radius_mean`, the odds of being a "M" cell 
-increases by 2.98 times.\
+increases by 2.98 times.
 
-## Reference
+# Reference
 - Hastie, T. J., Tibshirani, R. J., &amp; Wainwright, M. J. (2015). Statistical learning with sparsity: The lasso and generalizations. Boca Raton: CRC Press/Taylor &amp; Francis.\
 - Silge, J. LASSO regression using tidymodels and #TidyTuesday data for The Office.  https://juliasilge.com/blog/lasso-the-office/.\
