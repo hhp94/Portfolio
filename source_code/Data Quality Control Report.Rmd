@@ -1,0 +1,476 @@
+---
+title: "QC report - Gestation and birth weight by gender"
+author: "Hung Pham"
+date: "04/21/2021"
+output:
+  pdf_document:
+    number_sections: TRUE
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, warning = F, message = F)
+```
+
+# Synopsis
+The "birth weight" data is a toy dataset that contains simulated information of 
+135 babies. The variables recorded are birth weight (grams), length of gestation
+(weeks), gender (Male/Female), and unique ids.
+
+This report aims to accomplish two routine tasks: 1) Quality Control a dataset, 
+and 2) produce preliminary statistical analyses. In this case, the statistical
+analyses of interest is the association between birth weight, length of 
+gestation, and gender.
+
+Data is not uploaded to github. 
+
+# Libraries
+The following code chunk loads the relevant R libraries - collections of pre-
+programmed R functions wrapped in discrete packages.
+```{r}
+library(tidyverse) # Data cleaning and wrangling
+library(janitor) # Data cleaning
+library(here) # For reproducibility and ease of collaboration
+library(knitr) # Table formating 
+library(kableExtra) # This library formats our table to look nice
+library(rlang) # For writing functions
+library(patchwork) # For visualization
+library(GGally) # For pairwise plot
+library(magrittr) # Piping
+library(treemap) # Visualize categorical variables
+library(xtable) # Latex tables
+```
+
+# QC
+## Data input
+- Import the data with `read_csv`. There are *135 obs* and *4 variables*.
+- Add another column `unique_id` in case there are problems with the `new_id`
+column.
+- Convert to lower case and remove problematic 
+symbols (e.g. `\`,`,`,`...`, etc.) from column names with `clean_names`.
+- `my_dat` is our raw data. We print the first 10 observations from the data.
+
+```{r}
+loc<-here() # This variable tracks the root path of this file on a local machine
+
+figure_n<-0 # Counter for figure number
+count_fig<-function(reset = NULL){
+        reset<- enexpr(reset)
+        if(is.null(reset)){
+        figure_n<<-figure_n+1} else {figure_n<<- 0}
+} # This function automatically update our figure number everytime its ran
+
+xtable2kable <- function(x) {
+        out <- capture.output(print(x, table.placement = NULL))[-(1:2)]
+        out <- paste(out, collapse = "\n")
+        structure(out, format = "latex", class = "knitr_kable")
+} # This function solves a bug with Latex
+
+my_dat<-read_csv(paste0(loc,"/data/Play_Data_V1.csv")) %>% 
+        clean_names() # Load the data into R 
+        
+my_dat$id<- 1:nrow(my_dat) # Add a unique id column.
+
+head(my_dat, 10) %>% 
+        xtable(caption = "Top 10 obs of raw data") %>% 
+        xtable2kable() %>%
+        kable_classic_2(latex_options = "HOLD_position", position = "center")
+```
+
+- Immediately, we see some issues:\
+        - `gender` has numerical values.\
+        - There are missing data in `birthweight` and `gender`.
+- We first identify the problematic values in each variable. Then we will 
+process missing data.
+
+## Identify individual errors
+### `birthweight`
+```{r birth weight stat}
+summary(my_dat$birthweight) %>% 
+        broom::tidy() %>%  
+        xtable(digits = 4, caption = "Summary stats of birth weights") %>% 
+        xtable2kable() %>%
+        kable_classic_2(latex_options = "HOLD_position",position = "center") 
+```
+
+`birthweight` is measured in grams. Value as low as 0.2983 or as 
+high as 300033.5 are improbable. We print the `birthweight` values of < 5% 
+percentile and > 95% percentile.
+
+```{r outside of range}
+bw_quantile<-quantile(my_dat$birthweight, c(0.05,0.95), na.rm = T)
+
+my_dat %>% 
+        filter(birthweight < bw_quantile[1] | birthweight > bw_quantile[2]) %>%
+        arrange(birthweight) %>%   
+        xtable(digits = 3, 
+               caption = "Obs where birth weight are outside of the 5th-95th percent range") %>%
+        xtable2kable() %>%
+        kable_classic_2(latex_options = "HOLD_position",position = "center") 
+```
+
+Clearly, 0.2983, 0.3855, and 3e6 grams are not possible. We label and collect
+these errors for fixing.
+
+```{r}
+problem_row<-tibble(id = c(23,34,69),
+                    issue = c("bw too small", "bw too small", "bw too large"))
+```
+
+### `length_of_gestation`
+```{r gastation length stats}
+summary(my_dat$length_of_gestation) %>% 
+        broom::tidy() %>%    
+        xtable(digits = 3, caption = "Summary stats of gestation length") %>% 
+        xtable2kable() %>% 
+        kable_classic_2(latex_options = "HOLD_position",position = "center") 
+```
+
+For `length_of_gestation`, value as high as 380.1429 is improbable. We gather
+values > 95% percentile.
+
+```{r}
+lg_quantile<-quantile(my_dat$length_of_gestation, 0.95, na.rm = T)
+my_dat %>% 
+        filter(length_of_gestation > lg_quantile[1]) %>%
+        arrange(length_of_gestation) %>%    
+        xtable(digits = 3, 
+               caption = "Obs where gestation length are > 95th percentile") %>% 
+        xtable2kable() %>%  
+        kable_classic_2(latex_options = "HOLD_position",position = "center") 
+```
+
+We collect the id where length of gestation is 380.1429 and move on. 
+```{r}
+problem_row<- problem_row %>%
+        bind_rows(tibble(id = 135,
+                         issue = c("gestation too long")))
+```
+
+### `new_id`
+```{r}
+head(my_dat$new_id) # Top new_id values
+class(my_dat$new_id) # Type of variable for new_id
+```
+
+The fact that the top values of `new_id` are all integers yet R imported 
+`new_id` as a character variable raised concerns. We use REGEX to detect
+which values are not integers.
+```{r}
+my_dat %>% 
+        filter(!str_detect(new_id, "\\d")) %>%    
+        xtable(digits = 3, caption = "Obs where id is not an integer") %>% 
+        xtable2kable() %>%  
+        kable_classic_2(latex_options = "HOLD_position",position = "center") 
+```
+
+IDs shouldn't be `Male` or `Female`. Also, individual IDs should be unique. 
+We check if there are any repeats in `new_id`.
+```{r}
+my_dat %>% 
+        filter(str_detect(new_id, "\\d")) %>% 
+        pull(new_id) %>% 
+        unique(.) %>% 
+        length(.)
+```
+
+The math checks out. There are 133 unique numerical IDs after removing two 
+wrong IDs. We confirm that each observation is unique and collect the 
+problematic IDs rows.
+```{r}
+problem_row<- problem_row %>%
+        bind_rows(tibble(id = c(26,45),
+                         issue = c("wrong ID")))
+```
+
+### `gender`
+```{r}
+tabyl(my_dat,gender) %>%    
+        xtable(digits = 3, caption = "Frequency table of gender variable") %>% 
+        xtable2kable() %>%  
+        kable_classic_2(latex_options = "HOLD_position",position = "center") 
+```
+
+Gender shouldn't be floats. We collect these rows.
+```{r}
+wrong_gender<- my_dat %>% 
+        filter(str_detect(gender,"[[\\d]]")) %>% pull(id)
+
+problem_row<- problem_row %>%
+        bind_rows(tibble(id = wrong_gender,
+                         issue = c("wrong gender")))
+```
+
+## Missing data
+We investigate the pattern of missing values.
+```{r, fig.align='center',fig.width=6,fig.height=5, cache= T}
+missing_to_binary<-function(x){if_else(is.na(x),1,0)}
+
+# `for_miss_viz` converts missing values to 1, non missing values to 0, and
+# problematic values to 2. 
+for_miss_viz<-my_dat %>% 
+        mutate(across(.cols = -id,
+                      .fns = missing_to_binary)) %>% 
+        pivot_longer(cols = -id,
+                     names_to = "column_name") %>% 
+        left_join(problem_row, by = "id") %>% ### Join with the problem table
+        mutate(value = case_when(
+                ### Convert problematic values to 2
+                grepl("bw too", .$issue) & column_name == "birthweight" ~ 2,
+                grepl("gestation", .$issue) & column_name == "length_of_gestation" ~ 2,
+                grepl("wrong ID", .$issue) & column_name == "new_id" ~ 2,
+                grepl("gender", .$issue) & column_name == "gender" ~ 2,
+                T ~ value),
+               ### Convert data to factor for visualization
+               x_coord = fct_inseq(as.character(rep(1:4, 135))),
+               y_coord = fct_rev(fct_inseq(as.character(id))),
+               my_color = factor(value))
+
+count_fig() # Count figure
+ggplot(for_miss_viz, aes(x_coord, y_coord)) +
+        geom_tile(aes(fill = my_color),color = "white")+
+        scale_fill_manual(values = c("grey","black","red"),
+                          labels = c("not missing", "missing", "problematic value"))+
+        scale_x_discrete(labels = setdiff(names(my_dat),"id"), position = "top")+
+        theme_minimal()+
+        labs(title = paste0("Figure ",figure_n,": Missing matrix of birth weight data"))+
+        theme(axis.title = element_blank(),
+              axis.text.y = element_blank(),
+              panel.grid = element_blank(),
+              legend.title = element_blank(),
+              legend.position = "right")
+```
+
+From Figure 1, we conclude that **available data analysis** is appropriate. 
+Meaning bias is not an issue if we proceed with the analysis only
+using the available data. This is because the amount of missing data is not 
+significant and the pattern can be safely concluded as missing at completely 
+random (MCAR). Sensitivity analysis with imputed data using multiple imputation 
+can be performed to confirm the robustness of the available data analysis but it wouldn't be needed in this scenario.
+
+## Removing problemmatic values
+We can setup a for-loop to remove the problematic values.
+```{r}
+tempt_dat<-for_miss_viz %>% filter(value == 2) %>% select(id,column_name)
+
+my_dat_clean<-my_dat
+
+remove_walk<-function(x,y){
+        my_dat_clean[which(my_dat_clean$id == x), y]<<-NA
+}
+
+walk2(tempt_dat$id,tempt_dat$column_name,remove_walk)
+```
+
+We check the imputation.
+```{r}
+before_remove<-problem_row %>% left_join(my_dat,by = "id") %>% 
+        rename(gestation_l = length_of_gestation)
+after_remove<-problem_row %>% left_join(my_dat_clean,by = "id") %>%
+        rename(gestation_l = length_of_gestation)
+
+xtable(digits = 3, x =  before_remove,
+       caption = "Obs where there are improbable values, before replacing the values with NA") %>%
+        xtable2kable() %>%
+        kable_classic_2(latex_options = "HOLD_position",position = "center")
+xtable(digits = 3,x =  after_remove,
+    caption = "After replacing the values with NA") %>%
+        xtable2kable() %>%
+        kable_classic_2(latex_options = "HOLD_position",position = "center")
+```
+
+This table shows the list of all our problematic values and the successful 
+removal of those values. `my_dat_clean` is our cleaned data. 
+
+# Statistical Analysis
+## Birthweight and length of gestation
+### Normality assumption
+```{r}
+## This function draws qq plots
+draw_qq<-function(my_var,dat,strata = NULL){
+        if(!is.null(strata)){
+                p<-dat %>% ggplot(aes(sample = .data[[my_var]])) +
+                        geom_qq()+
+                        geom_qq_line()+
+                        theme_bw()+
+                        facet_wrap(~ .data[[strata]])+
+                        labs(subtitle = paste0(my_var," qq-plot"))+
+                        theme(plot.subtitle = element_text(hjust = 0, size = 13))
+                return(p)
+        }
+        p<-dat %>% ggplot(aes(sample = .data[[my_var]])) +
+                        geom_qq()+
+                        geom_qq_line()+
+                        theme_bw()+
+                        labs(subtitle = paste0(my_var," qq-plot"))+
+                        theme(plot.subtitle = element_text(hjust = 0, size = 13))
+        p
+}
+p2<-draw_qq("birthweight",my_dat_clean)
+p3<-draw_qq("length_of_gestation",my_dat_clean)
+```
+
+```{r, fig.align='center',fig.width=12,fig.height=6}
+count_fig() # Update figure number
+p2+p3+plot_annotation(title = paste0("Figure ",figure_n,
+                                     ": qqplots of birthweight and gestation length"))
+```
+
+From the qq-plots, we see that length of gestation might not be normally 
+distributed. We use the Shapiro-Wilk test to formally test the normal assumptions
+of `birthweight` and `length_of_gestation`. 
+
+```{r}
+## This function performs the shapiro-wilk test and automatically generate 
+## decisions when pvalue is >= 0.05
+
+my_shapiro<-function(my_var,dat){
+        for_map<-function(x){
+                res<-shapiro.test(dat[[x]]) %>%
+                        broom::tidy()
+                # If p.value is larger than 0.05 then we reject the null hypothesis
+                if (res$p.value >= 0.05) {
+                        res %<>% mutate(H0 = paste0(x, " is normally distributed"),
+                                        decision = "fail to reject H0",
+                                        n = length(na.omit(dat[[x]]))) %>% 
+                                select(statistic, p.value, n, everything())
+                } else {
+                        res %<>% mutate(H0 = paste0(x, " is normally distributed"),
+                                        decision = "reject H0",
+                                        n = length(na.omit(dat[[x]]))) %>% 
+                                select(statistic, p.value, n, everything())
+                }
+        }
+        res<-map(my_var,for_map) %>% reduce(rbind)
+        res
+}
+my_shapiro(c("birthweight","length_of_gestation"), my_dat_clean) %>% 
+        mutate(method = "Shapiro-Wilk") %>% 
+        xtable(digits = 3, 
+               caption = "Testing the normality assumption of birth weight and gestation length") %>% 
+        xtable2kable() %>%  
+        kable_classic_2(latex_options = "HOLD_position",position = "center") 
+```
+
+We reject the null hypothesis that length of gestation is normally distributed
+and fail to reject the null hypothesis that birth weight is normally distributed.
+
+### Correlation
+```{r, cache=F, fig.align='center',fig.width=4,fig.height=4}
+count_fig()
+my_dat_clean %>% ggplot(aes(x = birthweight, y = length_of_gestation)) +
+        geom_point()+
+        geom_smooth(method = "loess")+
+        labs(title = paste0("Figure ",figure_n,
+                                     ": Scatterplot of birthweight by length of gestation"))+
+        theme_bw()
+```
+
+From the scatter-plot, we can safely assume that there exists a linear correlation
+between `birthweight` and `length_of_gestation` for the range of values in our 
+data. Hence, we can use a Pearson's correlation to measure this correlation. 
+
+```{r}
+pearson_res<- cor.test(my_dat_clean$birthweight, my_dat_clean$length_of_gestation) %>% 
+        broom::tidy() %>% rename(correlation = estimate) %>% 
+        t() %>% as.data.frame()
+        
+pearson_res %>% tibble(term = rownames(.)) %>%
+        rename("Value" = V1) %>% select(term,Value) %>% 
+        kable(digits = 3, caption = "Pearson's correlation test") %>% 
+        kable_classic_2(latex_options = "HOLD_position",position = "center") 
+```
+
+The Pearson's correlation between `birthweight` and `length_of_gestation` of 
+0.622 *is significant* at a two sided alpha of 0.05.
+
+### Differential effect by gender
+We remake the qq-plots by gender using `draw_qq` programmed on line 257.
+```{r}
+p4<-draw_qq("birthweight",my_dat_clean,"gender")
+p5<-draw_qq("length_of_gestation",my_dat_clean,"gender")
+```
+
+```{r, fig.align='center',fig.width=8,fig.height=6}
+count_fig()
+(p4/p5)+plot_annotation(title = paste0("Figure ",figure_n,
+                                     ": qqplots of birthweight and gestation length by gender"))
+```
+
+#### Is the birthweight between males and females babies the same?
+We use the t-test to test the following H0: *the mean `birthweight` between males and females are the same.*
+```{r}
+t_test_res<- t.test(my_dat_clean[which(my_dat_clean$gender == "Female"),
+                                 "birthweight"],
+       my_dat_clean[which(my_dat_clean$gender == "Male"),"birthweight"],
+       var.equal = T) %>% 
+        broom::tidy() %>% 
+        rename("mean diff" = estimate,
+               "mean female" = estimate1,
+               "mean male" = estimate2) %>% t() %>% as.data.frame()
+
+t_test_res %>% tibble(term = rownames(.)) %>% rename("Value" = V1) %>% 
+        select(term,Value) %>% 
+        xtable(digits = 3, 
+               caption = "T-test mean difference between male and female birth weight, assuming
+            equal variance") %>% 
+        xtable2kable() %>% 
+        kable_classic_2(latex_options = "HOLD_position",position = "center") 
+```
+
+#### Is the length of gestation between males and females babies the same?
+We use the non-parametric Wilcoxson-rank sum test to test the following H0: 
+*the location shift (or median) of `length_of_gestation` between male and female is zero.*
+```{r}
+wil_cox_test<-wilcox.test(my_dat_clean[which(my_dat_clean$gender == "Female"),"length_of_gestation", drop = T],
+       my_dat_clean[which(my_dat_clean$gender == "Male"),"length_of_gestation", 
+                    drop = T]) %>% 
+        broom::tidy() %>% t() %>% as.data.frame() 
+
+wil_cox_test %>% tibble(term = rownames(.)) %>% rename("Value" = V1) %>% 
+        select(term,Value) %>% 
+        xtable(digits = 3,
+               caption = "Wilcox test of median shift between male and female length of gestation") %>% 
+        xtable2kable() %>% 
+        kable_classic_2(latex_options = "HOLD_position",position = "center") 
+```
+
+- We fail to reject the null hypothesis that the mean `birthweight` is the same
+between male and female with a two sided alpha = 0.05.
+
+- We fail to reject the null hypothesis that the median of `length_of_gestation` is
+the same between males and females with a two sided alpha = 0.05.
+
+# Recode
+We create another variable "term" where `length_of_gestation` < 37 weeks is 
+categorized as "pre-term" and "to term" otherwise. Then we create a treemap to
+visualize the proportion of to-term and pre-term by gender. 
+```{r}
+my_dat_clean$term<-ifelse(my_dat_clean$length_of_gestation < 37,
+                           "pre-term",
+                           "to term")
+
+tree_dat<-my_dat_clean %>% 
+        group_by(term, gender) %>% 
+        summarize(n = n()) %>% 
+        rbind(my_dat_clean %>% 
+                      group_by(term) %>%
+                      summarize(n = n()) %>% 
+                      mutate(gender = "both")
+        )
+tree_dat %>% 
+        kable(digits = 3, caption = "Frequency table of `term` alone and by gender") %>% 
+        kable_classic_2(latex_options = "HOLD_position",position = "center") 
+```
+
+```{r, fig.align='center',fig.width=7,fig.height=5}
+treemap(tree_dat[1:6,],
+        index = c("term", "gender"),
+        vSize = "n",
+        title = "Treemap of gestation term by gender")
+```
+
+# Session Info
+Session information for reproducibility.
+```{r}
+sessionInfo()
+```
+
